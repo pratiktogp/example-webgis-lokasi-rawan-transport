@@ -1,0 +1,6 @@
+{
+  "name": "WebGIS Pantauan Rawan Kecelakaan Nataru 2026/2027",
+  "description": "Sistem Informasi Geografis pemantauan titik rawan kecelakaan dan jalur transportasi Nataru 2026/2027 di wilayah NKRI berbasis OpenLayers.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
