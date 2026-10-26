@@ -121,6 +121,15 @@
   background: rgba(100, 116, 139, 0.8);
 }
 
+/* Hide scrollbar for Chrome, Safari, Opera and Firefox */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
 /* Print view stylesheet */
 @media print {
   aside, header, .no-print {

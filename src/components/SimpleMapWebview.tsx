@@ -37,9 +37,17 @@ import {
   Maximize2,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
   Info,
   Ruler,
-  Flame
+  Flame,
+  Plus,
+  Minus,
+  RotateCcw,
+  SlidersHorizontal,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 
 // Format atribut individual untuk popup dengan judul dan nilai
@@ -273,6 +281,10 @@ export const SimpleMapWebview: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [copiedCoords, setCopiedCoords] = useState(false);
 
+  // Responsive Mobile/Tablet States
+  const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
+  const [isGroupMenuOpen, setIsGroupMenuOpen] = useState(false);
+
   // Selected Item for Center Popup & Pagination State
   const [activePopupData, setActivePopupData] = useState<GenericFeatureInfo | null>(null);
   const [popupPage, setPopupPage] = useState(1);
@@ -347,13 +359,47 @@ export const SimpleMapWebview: React.FC = () => {
     popupOverlayRef.current?.setPosition(undefined);
   }, []);
 
-  // Helper untuk membuka popup ter-anchor di titik tanpa menggeser posisi peta maupun zoom ("biarkan saja di posisinya")
+  // Helper saat user klik langsung data pada peta:
+  // "tapi jika saya sendiri yang klik data nya, maka jangan didekatkan" (pertahankan posisi & zoom apa adanya)
   const handleFeatureSelect = useCallback((data: GenericFeatureInfo) => {
     setActivePopupData(data);
     setPopupPage(1); // Selalu reset ke halaman 1 saat objek baru dipilih
-    setSearchQuery('');
 
-    // Segera posisikan overlay tepat di koordinat objek (tanpa menggeser/center peta)
+    // Segera posisikan overlay tepat di koordinat objek (tanpa menggeser atau mengubah zoom peta)
+    if (popupOverlayRef.current) {
+      popupOverlayRef.current.setPosition(fromLonLat(data.coordinates));
+    }
+  }, []);
+
+  // Helper saat user menggunakan fitur Search:
+  // "jika saya menggunakan fitur search dan tampilan saya jauh dari titik/ data nya, maka perdekatkan"
+  const handleSearchSelect = useCallback((data: GenericFeatureInfo) => {
+    setActivePopupData(data);
+    setPopupPage(1);
+    setSearchQuery('');
+    setIsMobileSearchOpen(false);
+    setIsGroupMenuOpen(false);
+
+    // Pastikan layer titik aktif agar user dapat melihat objek yang dicari
+    setShowBlackspots(true);
+
+    const map = mapInstanceRef.current;
+    if (map) {
+      const view = map.getView();
+      const currentZ = view.getZoom() ?? 6.8;
+
+      // Jika tampilan saat ini sedang jauh (zoom < 13, misalnya zoom 5 s/d 12),
+      // maka perdekatkan ke titik target dengan zoom 13.5 secara mulus.
+      // Jika tampilan sudah dekat (zoom >= 13), cukup animasikan posisi ke titik tersebut.
+      const targetZoom = currentZ < 13 ? 13.5 : currentZ;
+
+      view.animate({
+        center: fromLonLat(data.coordinates),
+        zoom: targetZoom,
+        duration: 700
+      });
+    }
+
     if (popupOverlayRef.current) {
       popupOverlayRef.current.setPosition(fromLonLat(data.coordinates));
     }
@@ -832,6 +878,8 @@ export const SimpleMapWebview: React.FC = () => {
         setActivePopupData(null);
         setIsWfsSidebarOpen(false);
         setIsGuideModalOpen(false);
+        setIsMobileSearchOpen(false);
+        setIsGroupMenuOpen(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -840,23 +888,96 @@ export const SimpleMapWebview: React.FC = () => {
 
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-slate-950 font-sans select-none flex flex-col">
-      {/* Minimal Top Header (Webview Bar) */}
-      <header className="h-13 bg-slate-950/95 backdrop-blur-md border-b border-slate-800 px-3 sm:px-4 flex items-center justify-between gap-3 z-20 shrink-0">
-        {/* Brand wordmark */}
+      {/* Minimal Top Header (Webview Bar) with Full Multi-Device Responsiveness */}
+      <header className="h-13 bg-slate-950/95 backdrop-blur-md border-b border-slate-800 px-2.5 sm:px-4 flex items-center justify-between gap-1.5 sm:gap-3 z-20 shrink-0 relative">
+        {/* Mobile Search Overlay Bar (Active when isMobileSearchOpen is true) */}
+        {isMobileSearchOpen ? (
+          <div className="absolute inset-0 bg-slate-950 px-2.5 sm:px-4 flex items-center gap-2 z-30 animate-in fade-in slide-in-from-top-1 duration-150">
+            <Search className="w-4 h-4 text-sky-400 shrink-0" />
+            <input
+              type="text"
+              autoFocus
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && filteredSearchList.length > 0) {
+                  handleSearchSelect(createBlackspotPopupData(filteredSearchList[0]));
+                }
+              }}
+              placeholder="Cari lokasi, ruas jalan, kecamatan..."
+              className="flex-1 bg-transparent text-white text-xs placeholder-slate-500 focus:outline-none"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="p-1 text-slate-400 hover:text-white text-xs cursor-pointer"
+              >
+                ✕
+              </button>
+            )}
+            <button
+              onClick={() => {
+                setIsMobileSearchOpen(false);
+                setSearchQuery('');
+              }}
+              className="px-2.5 py-1 text-xs text-slate-300 hover:text-white rounded-lg bg-slate-900 border border-slate-700 cursor-pointer font-medium"
+            >
+              Batal
+            </button>
+
+            {/* Mobile Autocomplete Suggestions Dropdown */}
+            {filteredSearchList.length > 0 && (
+              <div className="absolute top-full left-0 right-0 bg-slate-900/98 backdrop-blur-xl border-b border-x border-slate-700 shadow-2xl p-1.5 z-40 max-h-64 overflow-y-auto space-y-0.5">
+                {filteredSearchList.map((pt) => (
+                  <button
+                    key={pt.id}
+                    onClick={() => handleSearchSelect(createBlackspotPopupData(pt))}
+                    className="w-full text-left p-2 rounded-lg hover:bg-slate-800 text-xs transition cursor-pointer flex items-center justify-between"
+                  >
+                    <div className="truncate pr-2">
+                      <span className="font-semibold text-white block truncate">{pt.name}</span>
+                      <span className="text-[10px] text-slate-400 block truncate">
+                        {getKecamatanName(pt)} · {pt.cityRegency}
+                      </span>
+                    </div>
+                    <span className={`text-[10px] font-bold shrink-0 ${
+                      pt.severity === 'Tinggi' ? 'text-red-400' : pt.severity === 'Sedang' ? 'text-amber-400' : 'text-sky-400'
+                    }`}>
+                      {pt.severity}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : null}
+
+        {/* Brand wordmark - Responsive Label */}
         <div className="flex items-center gap-2 shrink-0">
-          <span className="w-2.5 h-2.5 rounded-full bg-red-500 shadow-sm shadow-red-500/50" />
-          <h1 className="text-sm font-bold text-white tracking-tight whitespace-nowrap">
-            WebGIS Natal dan Tahun Baru 2026/2027
+          <span className="relative flex h-2.5 w-2.5">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500 shadow-sm shadow-red-500/50"></span>
+          </span>
+          {/* Responsive Brand Titles */}
+          <h1 className="text-xs sm:text-sm font-bold text-white tracking-tight">
+            <span className="inline sm:hidden">WebGIS Nataru</span>
+            <span className="hidden sm:inline lg:hidden">WebGIS Nataru 2026/2027</span>
+            <span className="hidden lg:inline">WebGIS Natal dan Tahun Baru 2026/2027</span>
           </h1>
         </div>
 
-        {/* Quick Search */}
-        <div className="relative flex-1 max-w-xs hidden md:block">
+        {/* Quick Search - Desktop & Tablet (sm:block) */}
+        <div className="relative flex-1 max-w-xs hidden sm:block">
           <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && filteredSearchList.length > 0) {
+                handleSearchSelect(createBlackspotPopupData(filteredSearchList[0]));
+              }
+            }}
             placeholder="Cari lokasi, kecamatan, ruas jalan..."
             className="w-full bg-slate-900 border border-slate-700 rounded-lg pl-8 pr-7 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-sky-500"
           />
@@ -875,10 +996,10 @@ export const SimpleMapWebview: React.FC = () => {
               {filteredSearchList.map((pt) => (
                 <button
                   key={pt.id}
-                  onClick={() => handleFeatureSelect(createBlackspotPopupData(pt))}
+                  onClick={() => handleSearchSelect(createBlackspotPopupData(pt))}
                   className="w-full text-left p-2 rounded hover:bg-slate-800 text-xs transition cursor-pointer flex items-center justify-between"
                 >
-                  <div className="truncate">
+                  <div className="truncate pr-2">
                     <span className="font-semibold text-white block truncate">{pt.name}</span>
                     <span className="text-[10px] text-slate-400 block truncate">
                       {getKecamatanName(pt)} · {pt.cityRegency}
@@ -895,12 +1016,21 @@ export const SimpleMapWebview: React.FC = () => {
           )}
         </div>
 
-        {/* Action Controls: Heatmap Toggle + WFS Sidebar Toggle + Basemap Switcher */}
-        <div className="flex items-center gap-2 shrink-0">
-          {/* Tombol Cepat Heatmap Kerawanan (Tinggi, Sedang, Waspada) */}
+        {/* Action Controls: Responsive Buttons + Grouped Menu */}
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          {/* Mobile Search Toggle Button (Tampil hanya di layar kecil < sm) */}
+          <button
+            onClick={() => setIsMobileSearchOpen(true)}
+            className="sm:hidden p-2 text-slate-300 hover:text-white bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-lg transition cursor-pointer"
+            title="Buka Pencarian"
+          >
+            <Search className="w-3.5 h-3.5 text-sky-400" />
+          </button>
+
+          {/* Tombol Cepat Heatmap Kerawanan */}
           <button
             onClick={() => setShowHeatmap(!showHeatmap)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border transition cursor-pointer shadow-sm ${
+            className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 text-xs font-semibold rounded-lg border transition cursor-pointer shadow-sm ${
               showHeatmap
                 ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 border-orange-400 font-bold shadow-orange-500/25 ring-2 ring-orange-400/30'
                 : 'bg-slate-900 hover:bg-slate-800 border-slate-700 hover:border-orange-500/50 text-slate-200'
@@ -909,80 +1039,273 @@ export const SimpleMapWebview: React.FC = () => {
           >
             <Flame className={`w-3.5 h-3.5 ${showHeatmap ? 'text-slate-950 fill-slate-950' : 'text-orange-400'}`} />
             <span className="hidden sm:inline">Heatmap</span>
-            <span className={`px-1.5 py-0.2 rounded font-mono text-[9px] ${
+            <span className={`px-1 sm:px-1.5 py-0.2 rounded font-mono text-[9px] ${
               showHeatmap ? 'bg-orange-700 text-white font-bold' : 'bg-slate-800 text-slate-400'
             }`}>
               {showHeatmap ? 'ON' : 'OFF'}
             </span>
           </button>
 
-          {/* Tombol Sidebar Kelola Layer & WFS */}
-          <button
-            onClick={() => setIsWfsSidebarOpen(true)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border transition cursor-pointer shadow-sm ${
-              isWfsSidebarOpen
-                ? 'bg-sky-500 text-slate-950 border-sky-400'
-                : 'bg-slate-900 hover:bg-slate-800 border-slate-700 hover:border-sky-500 text-slate-200'
-            }`}
-            title="Buka Panel Kelola Layer & WFS GeoServer"
-          >
-            <Radio className="w-3.5 h-3.5 text-sky-400" />
-            <span className="hidden sm:inline">Layer & WFS</span>
-            <span className="px-1.5 py-0.2 bg-sky-950 text-sky-300 border border-sky-800/80 rounded font-mono text-[9px]">
-              {wfsLayers.filter(l => l.enabled).length + (showBlackspots ? 1 : 0) + (showHeatmap ? 1 : 0)}
-            </span>
-          </button>
-
-          {/* Basemap Switcher dropdown button */}
-          <div className="relative">
+          {/* ============================================================== */}
+          {/* DESKTOP CONTROLS: Tampil penuh di laptop/komputer (md:flex)   */}
+          {/* ============================================================== */}
+          <div className="hidden md:flex items-center gap-2">
+            {/* Tombol Sidebar Kelola Layer & WFS */}
             <button
-              onClick={() => setShowBasemapDropdown(!showBasemapDropdown)}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 hover:border-sky-500 text-slate-200 text-xs font-semibold rounded-lg transition cursor-pointer"
-              title="Pilih Tampilan Peta Dasar"
+              onClick={() => setIsWfsSidebarOpen(true)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border transition cursor-pointer shadow-sm ${
+                isWfsSidebarOpen
+                  ? 'bg-sky-500 text-slate-950 border-sky-400'
+                  : 'bg-slate-900 hover:bg-slate-800 border-slate-700 hover:border-sky-500 text-slate-200'
+              }`}
+              title="Buka Panel Kelola Layer & WFS GeoServer"
             >
-              <Layers className="w-3.5 h-3.5 text-sky-400" />
-              <span className="hidden sm:inline text-slate-400 font-normal">Peta:</span>
-              <span className="text-sky-300 font-bold capitalize">
-                {activeBasemap === 'google-maps' ? 'Google Maps' :
-                 activeBasemap === 'osm' ? 'OpenStreetMap' : 'Google Satelit'}
+              <Radio className="w-3.5 h-3.5 text-sky-400" />
+              <span>Layer & WFS</span>
+              <span className="px-1.5 py-0.2 bg-sky-950 text-sky-300 border border-sky-800/80 rounded font-mono text-[9px]">
+                {wfsLayers.filter(l => l.enabled).length + (showBlackspots ? 1 : 0) + (showHeatmap ? 1 : 0)}
               </span>
             </button>
 
-            {showBasemapDropdown && (
-              <>
-                <div 
-                  className="fixed inset-0 z-30" 
-                  onClick={() => setShowBasemapDropdown(false)}
-                />
-                <div className="absolute right-0 mt-1.5 w-52 bg-slate-900/98 border border-slate-700 rounded-xl shadow-2xl p-2 z-40 space-y-1">
-                  <div className="text-[10px] uppercase font-bold text-slate-400 px-2 py-1 border-b border-slate-800 pb-1 mb-1 flex items-center justify-between">
-                    <span>Pilihan Peta Dasar</span>
-                    <span className="text-sky-400 font-mono text-[9px]">3 Pilihan</span>
+            {/* Basemap Switcher dropdown button */}
+            <div className="relative">
+              <button
+                onClick={() => setShowBasemapDropdown(!showBasemapDropdown)}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 hover:border-sky-500 text-slate-200 text-xs font-semibold rounded-lg transition cursor-pointer"
+                title="Pilih Tampilan Peta Dasar"
+              >
+                <Layers className="w-3.5 h-3.5 text-sky-400" />
+                <span className="text-slate-400 font-normal">Peta:</span>
+                <span className="text-sky-300 font-bold capitalize">
+                  {activeBasemap === 'google-maps' ? 'Google Maps' :
+                   activeBasemap === 'osm' ? 'OpenStreetMap' : 'Google Satelit'}
+                </span>
+              </button>
+
+              {showBasemapDropdown && (
+                <>
+                  <div 
+                    className="fixed inset-0 z-30" 
+                    onClick={() => setShowBasemapDropdown(false)}
+                  />
+                  <div className="absolute right-0 mt-1.5 w-52 bg-slate-900/98 border border-slate-700 rounded-xl shadow-2xl p-2 z-40 space-y-1">
+                    <div className="text-[10px] uppercase font-bold text-slate-400 px-2 py-1 border-b border-slate-800 pb-1 mb-1 flex items-center justify-between">
+                      <span>Pilihan Peta Dasar</span>
+                      <span className="text-sky-400 font-mono text-[9px]">3 Pilihan</span>
+                    </div>
+                    {[
+                      { id: 'google-maps', name: 'Google Maps', sub: 'Peta Jalan & Navigasi' },
+                      { id: 'osm', name: 'OpenStreetMap', sub: 'Peta Komunitas Global (OSM)' },
+                      { id: 'google-satellite', name: 'Google Satelit', sub: 'Citra Satelit & Hybrid' }
+                    ].map((bm) => (
+                      <button
+                        key={bm.id}
+                        onClick={() => {
+                          setActiveBasemap(bm.id as BasemapId);
+                          setShowBasemapDropdown(false);
+                        }}
+                        className={`w-full text-left px-2.5 py-1.5 text-xs rounded-lg transition flex items-center justify-between cursor-pointer ${
+                          activeBasemap === bm.id 
+                            ? 'bg-sky-500/20 text-sky-300 font-bold border border-sky-500/40' 
+                            : 'text-slate-300 hover:bg-slate-800'
+                        }`}
+                      >
+                        <div>
+                          <div className="font-semibold text-xs">{bm.name}</div>
+                          <div className="text-[10px] text-slate-500">{bm.sub}</div>
+                        </div>
+                        {activeBasemap === bm.id && <span className="w-1.5 h-1.5 rounded-full bg-sky-400"></span>}
+                      </button>
+                    ))}
                   </div>
-                  {[
-                    { id: 'google-maps', name: 'Google Maps', sub: 'Peta Jalan & Navigasi' },
-                    { id: 'osm', name: 'OpenStreetMap', sub: 'Peta Komunitas Global (OSM)' },
-                    { id: 'google-satellite', name: 'Google Satelit', sub: 'Citra Satelit & Hybrid' }
-                  ].map((bm) => (
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* ============================================================== */}
+          {/* MOBILE & TABLET GROUPED MENU: Dibuat group agar menu tidak      */}
+          {/* tertutup di layar HP & Tab (< md)                               */}
+          {/* ============================================================== */}
+          <div className="relative md:hidden">
+            <button
+              onClick={() => setIsGroupMenuOpen(!isGroupMenuOpen)}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-lg border transition cursor-pointer shadow-sm ${
+                isGroupMenuOpen
+                  ? 'bg-sky-500 text-slate-950 border-sky-400'
+                  : 'bg-slate-900 hover:bg-slate-800 border-slate-700 hover:border-sky-500 text-slate-200'
+              }`}
+              title="Menu Pengaturan & Lapisan Peta"
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5 text-sky-400" />
+              <span className="text-[11px]">Menu</span>
+              <span className="px-1.5 py-0.2 bg-sky-950 text-sky-300 border border-sky-800 rounded font-mono text-[9px]">
+                {wfsLayers.filter(l => l.enabled).length + (showBlackspots ? 1 : 0) + (showHeatmap ? 1 : 0)}
+              </span>
+              <ChevronDown className={`w-3 h-3 text-slate-400 transition-transform ${isGroupMenuOpen ? 'rotate-180' : ''}`} />
+            </button>
+
+            {/* Grouped Menu Dropdown Panel */}
+            {isGroupMenuOpen && (
+              <>
+                <div
+                  className="fixed inset-0 z-30 bg-black/60 backdrop-blur-xs"
+                  onClick={() => setIsGroupMenuOpen(false)}
+                />
+                <div className="absolute right-0 top-full mt-2 w-[min(320px,calc(100vw-20px))] bg-slate-900/98 backdrop-blur-xl border border-slate-700/90 rounded-2xl shadow-2xl p-3 z-40 space-y-3 animate-in fade-in zoom-in-95 duration-150 max-h-[calc(100vh-70px)] overflow-y-auto">
+                  {/* Header Drawer */}
+                  <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+                    <div className="flex items-center gap-1.5">
+                      <SlidersHorizontal className="w-4 h-4 text-sky-400" />
+                      <span className="font-bold text-white text-xs">Menu & Lapisan Peta</span>
+                    </div>
                     <button
-                      key={bm.id}
-                      onClick={() => {
-                        setActiveBasemap(bm.id as BasemapId);
-                        setShowBasemapDropdown(false);
-                      }}
-                      className={`w-full text-left px-2.5 py-1.5 text-xs rounded-lg transition flex items-center justify-between cursor-pointer ${
-                        activeBasemap === bm.id 
-                          ? 'bg-sky-500/20 text-sky-300 font-bold border border-sky-500/40' 
-                          : 'text-slate-300 hover:bg-slate-800'
-                      }`}
+                      onClick={() => setIsGroupMenuOpen(false)}
+                      className="p-1 text-slate-400 hover:text-white rounded-md hover:bg-slate-800 transition cursor-pointer"
                     >
-                      <div>
-                        <div className="font-semibold text-xs">{bm.name}</div>
-                        <div className="text-[10px] text-slate-500">{bm.sub}</div>
-                      </div>
-                      {activeBasemap === bm.id && <span className="w-1.5 h-1.5 rounded-full bg-sky-400"></span>}
+                      <X className="w-4 h-4" />
                     </button>
-                  ))}
+                  </div>
+
+                  {/* Group 1: Peta Dasar (Basemap) */}
+                  <div className="space-y-1.5">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center justify-between">
+                      <span>Peta Dasar (Basemap)</span>
+                      <span className="text-[9px] text-sky-400 font-semibold capitalize">{activeBasemap.replace('-', ' ')}</span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {[
+                        { id: 'google-maps', name: 'Google', sub: 'Jalan' },
+                        { id: 'osm', name: 'OSM', sub: 'Standar' },
+                        { id: 'google-satellite', name: 'Satelit', sub: 'Hybrid' }
+                      ].map((bm) => (
+                        <button
+                          key={bm.id}
+                          onClick={() => {
+                            setActiveBasemap(bm.id as BasemapId);
+                          }}
+                          className={`p-2 rounded-lg border text-center transition cursor-pointer ${
+                            activeBasemap === bm.id
+                              ? 'bg-sky-500/20 border-sky-400 text-sky-300 font-bold'
+                              : 'bg-slate-950/70 border-slate-800 text-slate-300 hover:bg-slate-800'
+                          }`}
+                        >
+                          <div className="text-xs font-semibold leading-tight">{bm.name}</div>
+                          <div className="text-[9px] text-slate-400">{bm.sub}</div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Group 2: Lapisan Tematik (Marker, Heatmap, WFS) */}
+                  <div className="space-y-2 pt-1 border-t border-slate-800/80">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center justify-between">
+                      <span>Lapisan Spasial</span>
+                      <span className="text-[9px] text-slate-500">
+                        {wfsLayers.filter(l => l.enabled).length + (showBlackspots ? 1 : 0) + (showHeatmap ? 1 : 0)} Aktif
+                      </span>
+                    </div>
+
+                    {/* Titik Rawan Marker */}
+                    <div className="flex items-center justify-between p-2 bg-slate-950/60 rounded-xl border border-slate-800">
+                      <div className="flex items-center gap-2">
+                        <span className="relative flex h-2.5 w-2.5">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500"></span>
+                        </span>
+                        <span className="text-xs font-medium text-white">Titik Rawan (Marker)</span>
+                      </div>
+                      <button
+                        onClick={() => setShowBlackspots(!showBlackspots)}
+                        className={`px-2 py-1 rounded-md text-[10px] font-semibold border transition cursor-pointer flex items-center gap-1 ${
+                          showBlackspots
+                            ? 'bg-sky-500/20 text-sky-300 border-sky-500/40'
+                            : 'bg-slate-800 text-slate-500 border-slate-700'
+                        }`}
+                      >
+                        {showBlackspots ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
+                        <span>{showBlackspots ? 'Aktif' : 'Off'}</span>
+                      </button>
+                    </div>
+
+                    {/* Heatmap Kerawanan */}
+                    <div className="flex items-center justify-between p-2 bg-slate-950/60 rounded-xl border border-slate-800">
+                      <div className="flex items-center gap-2">
+                        <Flame className="w-3.5 h-3.5 text-orange-400" />
+                        <span className="text-xs font-medium text-white">Heatmap Densitas</span>
+                      </div>
+                      <button
+                        onClick={() => setShowHeatmap(!showHeatmap)}
+                        className={`px-2 py-1 rounded-md text-[10px] font-semibold border transition cursor-pointer flex items-center gap-1 ${
+                          showHeatmap
+                            ? 'bg-orange-500/20 text-orange-300 border-orange-500/40'
+                            : 'bg-slate-800 text-slate-500 border-slate-700'
+                        }`}
+                      >
+                        {showHeatmap ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
+                        <span>{showHeatmap ? 'Aktif' : 'Off'}</span>
+                      </button>
+                    </div>
+
+                    {/* Buka Kelola WFS GeoServer */}
+                    <button
+                      onClick={() => {
+                        setIsGroupMenuOpen(false);
+                        setIsWfsSidebarOpen(true);
+                      }}
+                      className="w-full flex items-center justify-between p-2 bg-slate-950/80 hover:bg-slate-800/80 rounded-xl border border-slate-800 hover:border-sky-500/50 text-xs font-medium text-white transition cursor-pointer"
+                    >
+                      <div className="flex items-center gap-2">
+                        <Radio className="w-3.5 h-3.5 text-sky-400" />
+                        <span>Kelola Layer & WFS GeoServer</span>
+                      </div>
+                      <span className="px-1.5 py-0.2 bg-sky-950 text-sky-300 border border-sky-800 rounded font-mono text-[9px]">
+                        {wfsLayers.length} Layer
+                      </span>
+                    </button>
+                  </div>
+
+                  {/* Group 3: Fokus Wilayah Cepat */}
+                  <div className="space-y-1.5 pt-1 border-t border-slate-800/80">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1">
+                      <Compass className="w-3 h-3 text-sky-400" />
+                      <span>Fokus Wilayah</span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-1">
+                      {presets.map((p) => (
+                        <button
+                          key={p.label}
+                          onClick={() => {
+                            if (mapInstanceRef.current) {
+                              mapInstanceRef.current.getView().animate({
+                                center: fromLonLat(p.coords),
+                                zoom: p.zoom,
+                                duration: 650
+                              });
+                            }
+                            setIsGroupMenuOpen(false);
+                          }}
+                          className="px-2 py-1 bg-slate-950/80 hover:bg-slate-800 border border-slate-800 rounded text-center text-[10px] text-slate-300 hover:text-white transition cursor-pointer truncate"
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Group 4: Panduan GeoServer */}
+                  <div className="pt-1 border-t border-slate-800/80">
+                    <button
+                      onClick={() => {
+                        setIsGroupMenuOpen(false);
+                        setIsGuideModalOpen(true);
+                      }}
+                      className="w-full py-1.5 px-2 bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-sky-500 rounded-lg text-slate-300 hover:text-white flex items-center justify-center gap-1.5 text-xs font-semibold transition cursor-pointer"
+                    >
+                      <HelpCircle className="w-3.5 h-3.5 text-sky-400" />
+                      <span>Panduan Setup GeoServer WFS</span>
+                    </button>
+                  </div>
                 </div>
               </>
             )}
@@ -995,9 +1318,9 @@ export const SimpleMapWebview: React.FC = () => {
         {/* OpenLayers Map Div */}
         <div ref={mapElementRef} className="w-full h-full" />
 
-        {/* Quick Region Presets Floating Bar */}
-        <div className="absolute top-3 left-3 z-10 flex items-center gap-1 p-1 bg-slate-900/90 backdrop-blur-md border border-slate-700/80 rounded-lg shadow-lg">
-          <span className="text-[10px] font-semibold text-slate-400 px-1.5 hidden sm:flex items-center gap-1">
+        {/* Quick Region Presets Floating Bar - Responsive Horizontal Swipe */}
+        <div className="absolute top-3 left-3 z-10 flex items-center gap-1 p-1 bg-slate-900/90 backdrop-blur-md border border-slate-700/80 rounded-lg shadow-lg max-w-[calc(100vw-64px)] sm:max-w-max overflow-x-auto no-scrollbar whitespace-nowrap">
+          <span className="text-[10px] font-semibold text-slate-400 px-1.5 hidden sm:flex items-center gap-1 shrink-0">
             <Compass className="w-3 h-3 text-sky-400" />
             <span>Fokus:</span>
           </span>
@@ -1013,74 +1336,119 @@ export const SimpleMapWebview: React.FC = () => {
                   });
                 }
               }}
-              className="px-2 py-1 text-[11px] font-medium text-slate-300 hover:text-white hover:bg-slate-800 rounded transition cursor-pointer"
+              className="px-2 py-0.5 sm:py-1 text-[10px] sm:text-[11px] font-medium text-slate-300 hover:text-white hover:bg-slate-800 rounded transition cursor-pointer shrink-0"
             >
               {p.label}
             </button>
           ))}
         </div>
 
+        {/* Floating Zoom & Map Navigation Controls */}
+        <div className="absolute top-14 right-3 z-10 flex flex-col gap-1 bg-slate-900/90 backdrop-blur-md border border-slate-700/80 rounded-lg shadow-xl p-1">
+          <button
+            onClick={() => {
+              if (mapInstanceRef.current) {
+                const view = mapInstanceRef.current.getView();
+                const cur = view.getZoom() ?? 6.8;
+                view.animate({ zoom: Math.min(18, cur + 1), duration: 250 });
+              }
+            }}
+            className="w-7 h-7 flex items-center justify-center text-slate-300 hover:text-white hover:bg-slate-800 rounded transition cursor-pointer"
+            title="Perbesar Peta (Zoom In)"
+          >
+            <Plus className="w-4 h-4" />
+          </button>
+          <div className="w-full h-[1px] bg-slate-800" />
+          <button
+            onClick={() => {
+              if (mapInstanceRef.current) {
+                const view = mapInstanceRef.current.getView();
+                const cur = view.getZoom() ?? 6.8;
+                view.animate({ zoom: Math.max(4.5, cur - 1), duration: 250 });
+              }
+            }}
+            className="w-7 h-7 flex items-center justify-center text-slate-300 hover:text-white hover:bg-slate-800 rounded transition cursor-pointer"
+            title="Perkecil Peta (Zoom Out)"
+          >
+            <Minus className="w-4 h-4" />
+          </button>
+          <div className="w-full h-[1px] bg-slate-800" />
+          <button
+            onClick={() => {
+              if (mapInstanceRef.current) {
+                mapInstanceRef.current.getView().animate({
+                  center: fromLonLat([110.0, -7.0]),
+                  zoom: 6.8,
+                  duration: 500
+                });
+              }
+            }}
+            className="w-7 h-7 flex items-center justify-center text-slate-300 hover:text-white hover:bg-slate-800 rounded transition cursor-pointer"
+            title="Reset Pandangan ke Indonesia (Pusat)"
+          >
+            <RotateCcw className="w-3.5 h-3.5 text-sky-400" />
+          </button>
+        </div>
+
         {/* Bottom-Left Controls: Legenda & Skala Peta (Dekat Box Legenda) */}
-        <div className="absolute bottom-3 left-3 z-10 flex flex-wrap items-center gap-2 max-w-[calc(100vw-24px)] pointer-events-auto">
+        <div className="absolute bottom-3 left-3 z-10 flex flex-wrap items-center gap-1.5 sm:gap-2 max-w-[calc(100vw-24px)] pointer-events-auto">
           {/* Minimal Legend Floating Pill */}
-          <div className="bg-slate-900/95 backdrop-blur-md border border-slate-700/80 rounded-lg px-3 py-1.5 shadow-xl flex items-center gap-3.5 text-[11px] text-slate-300">
-            <span className="text-[10px] uppercase font-bold text-slate-400 mr-0.5">Legenda:</span>
+          <div className="bg-slate-900/95 backdrop-blur-md border border-slate-700/80 rounded-lg px-2 sm:px-3 py-1 sm:py-1.5 shadow-xl flex items-center gap-2 sm:gap-3.5 text-[10px] sm:text-[11px] text-slate-300">
+            <span className="text-[9px] sm:text-[10px] uppercase font-bold text-slate-400 mr-0.5 hidden xs:inline">Legenda:</span>
             
             {/* Tinggi: Fast blink 800ms */}
-            <div className="flex items-center gap-1.5">
-              <span className="relative flex h-2.5 w-2.5">
+            <div className="flex items-center gap-1 sm:gap-1.5">
+              <span className="relative flex h-2 w-2 sm:h-2.5 sm:w-2.5 shrink-0">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500 border border-white"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 sm:h-2.5 sm:w-2.5 bg-red-500 border border-white"></span>
               </span>
-              <span className="text-red-400 font-semibold">Tinggi</span>
+              <span className="text-red-400 font-semibold text-[10px] sm:text-[11px]">Tinggi</span>
             </div>
 
             {/* Sedang: Slow pulse 2000ms */}
-            <div className="flex items-center gap-1.5">
-              <span className="relative flex h-2.5 w-2.5">
+            <div className="flex items-center gap-1 sm:gap-1.5">
+              <span className="relative flex h-2 w-2 sm:h-2.5 sm:w-2.5 shrink-0">
                 <span className="animate-pulse absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-60"></span>
-                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-400 border border-white"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 sm:h-2.5 sm:w-2.5 bg-amber-400 border border-white"></span>
               </span>
-              <span className="text-amber-400 font-semibold">Sedang</span>
+              <span className="text-amber-400 font-semibold text-[10px] sm:text-[11px]">Sedang</span>
             </div>
 
             {/* Waspada: No blink */}
-            <div className="flex items-center gap-1.5">
-              <span className="inline-flex rounded-full h-2.5 w-2.5 bg-sky-400 border border-white"></span>
-              <span className="text-sky-400 font-semibold">Waspada</span>
+            <div className="flex items-center gap-1 sm:gap-1.5">
+              <span className="inline-flex rounded-full h-2 w-2 sm:h-2.5 sm:w-2.5 bg-sky-400 border border-white shrink-0"></span>
+              <span className="text-sky-400 font-semibold text-[10px] sm:text-[11px]">Waspada</span>
             </div>
 
             {/* Heatmap Spectrum Indicator when Active */}
             {showHeatmap && (
-              <div className="flex items-center gap-1.5 pl-3 border-l border-slate-700/80 animate-in fade-in duration-200">
-                <Flame className="w-3 h-3 text-orange-400" />
-                <span className="text-[10px] text-slate-400 font-medium hidden xs:inline">Heatmap:</span>
+              <div className="flex items-center gap-1 sm:gap-1.5 pl-2 sm:pl-3 border-l border-slate-700/80 animate-in fade-in duration-200">
+                <Flame className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-orange-400 shrink-0" />
+                <span className="text-[9px] sm:text-[10px] text-slate-400 font-medium hidden sm:inline">Heatmap:</span>
                 <div className="flex items-center gap-1">
-                  <span className="text-[9px] text-sky-400 font-mono">Waspada</span>
-                  <div className="w-14 h-2 rounded-full bg-gradient-to-r from-blue-500 via-amber-400 to-red-600 shadow-inner" />
-                  <span className="text-[9px] text-red-400 font-bold font-mono">Tinggi</span>
+                  <div className="w-10 sm:w-14 h-1.5 sm:h-2 rounded-full bg-gradient-to-r from-blue-500 via-amber-400 to-red-600 shadow-inner" />
                 </div>
               </div>
             )}
           </div>
 
           {/* Scale Box (Dekat Box Legenda) */}
-          <div className="bg-slate-900/95 backdrop-blur-md border border-slate-700/80 rounded-lg px-2.5 py-1.5 shadow-xl flex items-center gap-2.5 text-[11px] text-slate-300">
-            <div className="flex items-center gap-1.5">
-              <span className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1">
-                <Ruler className="w-3 h-3 text-cyan-400" />
-                <span>Skala:</span>
+          <div className="bg-slate-900/95 backdrop-blur-md border border-slate-700/80 rounded-lg px-2 sm:px-2.5 py-1 sm:py-1.5 shadow-xl flex items-center gap-2 sm:gap-2.5 text-[10px] sm:text-[11px] text-slate-300">
+            <div className="flex items-center gap-1 sm:gap-1.5">
+              <span className="text-[9px] sm:text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1">
+                <Ruler className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-cyan-400 shrink-0" />
+                <span className="hidden xs:inline">Skala:</span>
               </span>
               <div 
                 ref={scaleLineTargetRef} 
-                className="custom-scale-wrapper flex items-center min-w-[55px]" 
+                className="custom-scale-wrapper flex items-center min-w-[45px] sm:min-w-[55px]" 
               />
             </div>
 
             <div className="w-[1px] h-3 bg-slate-700/80" />
 
-            <span className="text-[10px] font-mono text-slate-400 flex items-center gap-1">
-              <span>Zoom</span>
+            <span className="text-[9px] sm:text-[10px] font-mono text-slate-400 flex items-center gap-1">
+              <span className="hidden xs:inline">Zoom</span>
               <span className="text-cyan-400 font-semibold">{currentZoom.toFixed(1)}</span>
             </span>
           </div>
@@ -1117,7 +1485,7 @@ export const SimpleMapWebview: React.FC = () => {
             );
 
             return (
-              <div className="relative w-[300px] sm:w-[340px] max-w-[calc(100vw-32px)] bg-slate-900/98 backdrop-blur-md border border-slate-700/90 rounded-2xl shadow-2xl overflow-visible text-slate-200 flex flex-col mb-1 animate-in fade-in zoom-in-95 duration-150">
+              <div className="relative w-[min(340px,calc(100vw-24px))] max-h-[80vh] bg-slate-900/98 backdrop-blur-md border border-slate-700/90 rounded-2xl shadow-2xl overflow-visible text-slate-200 flex flex-col mb-1 animate-in fade-in zoom-in-95 duration-150">
                 {/* Header: Judul berdasarkan NILAI asli fitur (BUKAN nama field teknis) */}
                 <div className="p-3 bg-slate-950/95 border-b border-slate-800 rounded-t-2xl flex items-start justify-between gap-2.5 shrink-0">
                   <div className="min-w-0 flex-1">
