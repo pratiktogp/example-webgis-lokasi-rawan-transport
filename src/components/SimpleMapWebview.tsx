@@ -288,6 +288,7 @@ export const SimpleMapWebview: React.FC = () => {
   // Selected Item for Center Popup & Pagination State
   const [activePopupData, setActivePopupData] = useState<GenericFeatureInfo | null>(null);
   const [popupPage, setPopupPage] = useState(1);
+  const [isPopupMinimized, setIsPopupMinimized] = useState(false);
 
   // WFS Layers State
   const [wfsLayers, setWfsLayers] = useState<WfsLayerConfig[]>([
@@ -356,6 +357,7 @@ export const SimpleMapWebview: React.FC = () => {
   // Helper untuk menutup popup & reset posisi overlay
   const handleClosePopup = useCallback(() => {
     setActivePopupData(null);
+    setIsPopupMinimized(false);
     popupOverlayRef.current?.setPosition(undefined);
   }, []);
 
@@ -364,6 +366,7 @@ export const SimpleMapWebview: React.FC = () => {
   const handleFeatureSelect = useCallback((data: GenericFeatureInfo) => {
     setActivePopupData(data);
     setPopupPage(1); // Selalu reset ke halaman 1 saat objek baru dipilih
+    setIsPopupMinimized(false);
 
     // Segera posisikan overlay tepat di koordinat objek (tanpa menggeser atau mengubah zoom peta)
     if (popupOverlayRef.current) {
@@ -376,6 +379,7 @@ export const SimpleMapWebview: React.FC = () => {
   const handleSearchSelect = useCallback((data: GenericFeatureInfo) => {
     setActivePopupData(data);
     setPopupPage(1);
+    setIsPopupMinimized(false);
     setSearchQuery('');
     setIsMobileSearchOpen(false);
     setIsGroupMenuOpen(false);
@@ -1476,7 +1480,7 @@ export const SimpleMapWebview: React.FC = () => {
         >
           {activePopupData && (() => {
             const totalAttrs = activePopupData.attributes.length;
-            const itemsPerPage = 4;
+            const itemsPerPage = 2; // Dibuat 2 atribut per halaman agar popup sangat ramping di HP & Tablet
             const totalPages = Math.max(1, Math.ceil(totalAttrs / itemsPerPage));
             const currentPageSafe = Math.min(Math.max(1, popupPage), totalPages);
             const currentAttributes = activePopupData.attributes.slice(
@@ -1484,99 +1488,144 @@ export const SimpleMapWebview: React.FC = () => {
               currentPageSafe * itemsPerPage
             );
 
+            // Mode Terlipat (Minimized): Berupa chip mini agar layar ponsel tetap 95% terbuka untuk zoom & pan
+            if (isPopupMinimized) {
+              return (
+                <div className="relative bg-slate-900/98 backdrop-blur-md border border-slate-700/90 rounded-xl shadow-2xl px-2.5 py-1.5 text-slate-200 flex items-center gap-1.5 max-w-[230px] xs:max-w-[260px] mb-1 animate-in fade-in zoom-in-95 duration-100">
+                  <span className={`w-2 h-2 rounded-full shrink-0 ${
+                    activePopupData.severity === 'Tinggi' 
+                      ? 'bg-red-500 ring-2 ring-red-400/40' 
+                      : activePopupData.severity === 'Sedang' 
+                      ? 'bg-amber-400 ring-2 ring-amber-400/40' 
+                      : 'bg-sky-400 ring-2 ring-sky-400/40'
+                  }`} />
+                  <span className="font-bold text-[11px] text-white truncate flex-1">
+                    {activePopupData.title}
+                  </span>
+                  <button
+                    onClick={() => setIsPopupMinimized(false)}
+                    className="px-1.5 py-0.5 rounded bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 text-[9px] font-semibold transition cursor-pointer shrink-0"
+                    title="Buka Rincian Informasi"
+                  >
+                    Buka
+                  </button>
+                  <button
+                    onClick={handleClosePopup}
+                    className="p-1 text-slate-400 hover:text-white rounded hover:bg-slate-800 transition cursor-pointer shrink-0"
+                    title="Tutup"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                  {/* Mini Pointer Beak */}
+                  <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-2.5 h-2.5 bg-slate-900 border-r border-b border-slate-700/90 rotate-45 pointer-events-none" />
+                </div>
+              );
+            }
+
+            // Mode Lengkap tapi Super Ramping (Compact) khusus HP & Tablet
             return (
-              <div className="relative w-[min(340px,calc(100vw-24px))] max-h-[80vh] bg-slate-900/98 backdrop-blur-md border border-slate-700/90 rounded-2xl shadow-2xl overflow-visible text-slate-200 flex flex-col mb-1 animate-in fade-in zoom-in-95 duration-150">
-                {/* Header: Judul berdasarkan NILAI asli fitur (BUKAN nama field teknis) */}
-                <div className="p-3 bg-slate-950/95 border-b border-slate-800 rounded-t-2xl flex items-start justify-between gap-2.5 shrink-0">
+              <div className="relative w-[230px] xs:w-[255px] sm:w-[280px] max-w-[calc(100vw-24px)] bg-slate-900/98 backdrop-blur-md border border-slate-700/90 rounded-xl shadow-2xl overflow-visible text-slate-200 flex flex-col mb-1 animate-in fade-in zoom-in-95 duration-150">
+                {/* Header: Judul Nilai Fitur & Tombol Aksi */}
+                <div className="p-2 sm:p-2.5 bg-slate-950/95 border-b border-slate-800 rounded-t-xl flex items-start justify-between gap-1.5 shrink-0">
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1.5 mb-1 flex-wrap">
+                    <div className="flex items-center gap-1 mb-0.5 flex-wrap">
                       {activePopupData.severity && activePopupData.severity !== 'Info' ? (
-                        <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                        <span className={`inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[9px] font-bold ${
                           activePopupData.severity === 'Tinggi'
                             ? 'bg-red-500/20 text-red-300 border border-red-500/40'
                             : activePopupData.severity === 'Sedang'
                             ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
                             : 'bg-sky-500/20 text-sky-300 border border-sky-500/40'
                         }`}>
-                          <AlertTriangle className="w-3 h-3" />
-                          <span>Tingkat Kerawanan: {activePopupData.severity}</span>
+                          <AlertTriangle className="w-2.5 h-2.5" />
+                          <span>{activePopupData.severity}</span>
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-sky-500/20 text-sky-300 border border-sky-500/40">
-                          <Radio className="w-3 h-3" />
-                          <span>Layer Spasial WFS GeoServer</span>
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[9px] font-bold bg-sky-500/20 text-sky-300 border border-sky-500/40">
+                          <Radio className="w-2.5 h-2.5" />
+                          <span>WFS</span>
                         </span>
                       )}
                     </div>
 
-                    {/* Judul Popup = Nilai Asli Objek */}
-                    <h3 className="font-bold text-sm text-white leading-snug break-words">
+                    {/* Judul Objek */}
+                    <h3 className="font-bold text-xs text-white leading-tight truncate">
                       {activePopupData.title}
                     </h3>
                     {activePopupData.subtitle && (
-                      <p className="text-[11px] text-slate-400 mt-0.5 truncate">
+                      <p className="text-[10px] text-slate-400 mt-0.2 truncate">
                         {activePopupData.subtitle}
                       </p>
                     )}
                   </div>
 
-                  <button
-                    onClick={handleClosePopup}
-                    className="p-1 text-slate-400 hover:text-white rounded-md hover:bg-slate-800 transition cursor-pointer shrink-0"
-                    title="Tutup Popup"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
+                  {/* Tombol Minimize & Close */}
+                  <div className="flex items-center gap-0.5 shrink-0">
+                    <button
+                      onClick={() => setIsPopupMinimized(true)}
+                      className="p-1 text-slate-400 hover:text-sky-300 hover:bg-slate-800 rounded transition cursor-pointer"
+                      title="Kecilkan popup agar tidak menutupi peta"
+                    >
+                      <ChevronDown className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={handleClosePopup}
+                      className="p-1 text-slate-400 hover:text-white hover:bg-slate-800 rounded transition cursor-pointer"
+                      title="Tutup Popup"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
 
-                {/* Body: Paginated Attribute List */}
-                <div className="p-3 max-h-[260px] overflow-y-auto space-y-2 text-xs">
+                {/* Body: Paginated Attribute List (Hanya 2 Atribut per halaman agar pendek) */}
+                <div className="p-2 space-y-1.5 text-xs">
                   {/* Top Pagination Bar jika atribut lebih dari 1 halaman */}
                   {totalPages > 1 && (
-                    <div className="flex items-center justify-between bg-slate-950/70 px-2.5 py-1.5 rounded-lg border border-slate-800/80 text-[11px]">
+                    <div className="flex items-center justify-between bg-slate-950/80 px-2 py-0.5 rounded-lg border border-slate-800/80 text-[10px]">
                       <span className="text-slate-400 font-medium">
-                        Atribut {(currentPageSafe - 1) * itemsPerPage + 1}–{Math.min(currentPageSafe * itemsPerPage, totalAttrs)} dari {totalAttrs}
+                        {(currentPageSafe - 1) * itemsPerPage + 1}–{Math.min(currentPageSafe * itemsPerPage, totalAttrs)} dari {totalAttrs}
                       </span>
 
                       <div className="flex items-center gap-1">
                         <button
                           onClick={() => setPopupPage(p => Math.max(1, p - 1))}
                           disabled={currentPageSafe <= 1}
-                          className="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:pointer-events-none text-slate-200 hover:text-white font-semibold flex items-center gap-0.5 transition cursor-pointer text-[10px]"
+                          className="px-1 py-0.2 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:pointer-events-none text-slate-200 font-semibold flex items-center gap-0.5 transition cursor-pointer text-[9px]"
                           title="Halaman Sebelumnya"
                         >
-                          <ChevronLeft className="w-3 h-3" />
+                          <ChevronLeft className="w-2.5 h-2.5" />
                           <span>Prev</span>
                         </button>
 
-                        <span className="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700/80 text-sky-300 font-mono text-[10px]">
+                        <span className="px-1 rounded bg-slate-900 border border-slate-700/80 text-sky-300 font-mono text-[9px]">
                           {currentPageSafe}/{totalPages}
                         </span>
 
                         <button
                           onClick={() => setPopupPage(p => Math.min(totalPages, p + 1))}
                           disabled={currentPageSafe >= totalPages}
-                          className="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:pointer-events-none text-slate-200 hover:text-white font-semibold flex items-center gap-0.5 transition cursor-pointer text-[10px]"
+                          className="px-1 py-0.2 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:pointer-events-none text-slate-200 font-semibold flex items-center gap-0.5 transition cursor-pointer text-[9px]"
                           title="Halaman Berikutnya"
                         >
                           <span>Next</span>
-                          <ChevronRight className="w-3 h-3" />
+                          <ChevronRight className="w-2.5 h-2.5" />
                         </button>
                       </div>
                     </div>
                   )}
 
-                  {/* Attribute Cards (Judul & Nilai) */}
-                  <div className="space-y-1.5">
+                  {/* Attribute Cards (Kompak & Padat) */}
+                  <div className="space-y-1">
                     {currentAttributes.map((attr, idx) => (
                       <div 
                         key={idx} 
-                        className="bg-slate-950/60 p-2.5 rounded-lg border border-slate-800/80 hover:border-slate-700/80 transition"
+                        className="bg-slate-950/60 p-1.5 rounded-md border border-slate-800/80"
                       >
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-0.5">
+                        <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 block mb-0.5 leading-none">
                           {attr.label}:
                         </span>
-                        <div className="text-white font-medium text-xs leading-relaxed break-words">
+                        <div className="text-white font-medium text-[11px] leading-snug break-words">
                           {attr.value}
                         </div>
                       </div>
@@ -1590,10 +1639,10 @@ export const SimpleMapWebview: React.FC = () => {
                         <button
                           key={i}
                           onClick={() => setPopupPage(i + 1)}
-                          className={`h-1.5 rounded-full transition-all cursor-pointer ${
+                          className={`h-1 rounded-full transition-all cursor-pointer ${
                             currentPageSafe === i + 1 
-                              ? 'w-4 bg-sky-400' 
-                              : 'w-1.5 bg-slate-700 hover:bg-slate-600'
+                              ? 'w-3 bg-sky-400' 
+                              : 'w-1 bg-slate-700 hover:bg-slate-600'
                           }`}
                           title={`Ke halaman ${i + 1}`}
                         />
@@ -1602,29 +1651,31 @@ export const SimpleMapWebview: React.FC = () => {
                   )}
                 </div>
 
-                {/* Footer: Tombol Aksi Praktis */}
-                <div className="p-2.5 bg-slate-950/95 border-t border-slate-800 rounded-b-2xl flex items-center justify-between gap-2 text-xs shrink-0">
+                {/* Footer: Tombol Aksi Praktis Kompak */}
+                <div className="p-1.5 sm:p-2 bg-slate-950/95 border-t border-slate-800 rounded-b-xl flex items-center justify-between gap-1.5 text-[10px] shrink-0">
                   <button
                     onClick={() => copyCoords(activePopupData.coordinates)}
-                    className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg font-semibold flex items-center gap-1.5 transition cursor-pointer text-xs"
+                    className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded font-medium flex items-center gap-1 transition cursor-pointer text-[10px]"
+                    title="Salin Koordinat Spasial"
                   >
-                    {copiedCoords ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3 text-slate-300" />}
-                    <span>{copiedCoords ? 'Tersalin' : 'Salin Koordinat'}</span>
+                    {copiedCoords ? <Check className="w-2.5 h-2.5 text-emerald-400" /> : <Copy className="w-2.5 h-2.5 text-slate-300" />}
+                    <span>{copiedCoords ? 'Tersalin' : 'Salin'}</span>
                   </button>
 
                   <a
                     href={`https://www.google.com/maps?q=${activePopupData.coordinates[1]},${activePopupData.coordinates[0]}`}
                     target="_blank"
                     rel="noreferrer"
-                    className="px-2.5 py-1.5 bg-sky-500 hover:bg-sky-400 text-slate-950 rounded-lg font-bold flex items-center gap-1 transition text-xs"
+                    className="px-2 py-1 bg-sky-500 hover:bg-sky-400 text-slate-950 rounded font-bold flex items-center gap-1 transition text-[10px]"
+                    title="Buka di Navigasi Google Maps"
                   >
                     <span>Google Maps</span>
-                    <ExternalLink className="w-3 h-3" />
+                    <ExternalLink className="w-2.5 h-2.5" />
                   </a>
                 </div>
 
                 {/* Pointer Beak / Ekor panah mengarah tepat ke marker titik di peta */}
-                <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-4 h-4 bg-slate-950 border-r border-b border-slate-700/90 rotate-45 pointer-events-none shadow-md" />
+                <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-slate-950 border-r border-b border-slate-700/90 rotate-45 pointer-events-none shadow-sm" />
               </div>
             );
           })()}
